@@ -1,0 +1,34 @@
+# vim: set sts=2 ts=8 sw=2 tw=99 et ft=python:
+import os
+
+if not "SM" in globals():
+	SM = Extension
+
+projectName = 'Voice'
+
+project = SM.HL2Project(builder, projectName + '.ext')
+project.sources += [
+  'extension.cpp',
+  'ringbuffer.cpp',
+  '../../public/smsdk_ext.cpp',
+  '../../public/CDetour/detours.cpp',
+  '../../public/asm/asm.c',
+  '../../public/libudis86/decode.c',
+  '../../public/libudis86/itab.c',
+  '../../public/libudis86/syn-att.c',
+  '../../public/libudis86/syn-intel.c',
+  '../../public/libudis86/syn.c',
+  '../../public/libudis86/udis86.c',
+]
+
+for sdk_name in SM.sdks:
+  sdk = SM.sdks[sdk_name]
+  binary = SM.HL2Config(project, projectName + '.ext', sdk)
+  binary.compiler.cxxincludes += [
+    os.path.join(builder.sourcePath, 'celt')
+  ]
+  binary.compiler.linkflags += [
+    os.path.join(builder.sourcePath, 'celt', 'libcelt0.a')
+  ]
+
+SM.extensions += builder.Add(project)
