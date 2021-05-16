@@ -1,0 +1,310 @@
+# vim: set sts=2 ts=8 sw=2 tw=99 et ft=python:
+import os
+
+def ResolveEnvPath(env, folder):
+  if env in os.environ:
+    path = os.environ[env]
+    if os.path.isdir(path):
+      return path
+    return None
+
+  head = os.getcwd()
+  oldhead = None
+  while head != None and head != oldhead:
+    path = os.path.join(head, folder)
+    if os.path.isdir(path):
+      return path
+    oldhead = head
+    head, tail = os.path.split(head)
+
+  return None
+
+def Normalize(path):
+  return os.path.abspath(os.path.normpath(path))
+  
+class DHooksConfig(object):
+  def __init__(self):
+    self.mms_root = None
+    self.sm_root = None
+    self.task = None
+	
+  @property
+  def tag(self):
+    if builder.options.debug == '1':
+      return 'Debug'
+    return 'Release'
+
+  def detectProductVersion(self):
+    builder.AddConfigureFile('product.version')
+
+    # For OS X dylib versioning
+    import re
+    with open(os.path.join(builder.sourcePath, 'product.version'), 'r') as fp:
+      productContents = fp.read()
+    m = re.match('(\d+)\.(\d+)\.(\d+).*', productContents)
+    if m == None:
+      self.productVersion = '1.0.0'
+    else:
+      major, minor, release = m.groups()
+      self.productVersion = '{0}.{1}.{2}'.format(major, minor, release)
+
+  def detectSDKs(self):   
+    if builder.options.mms_path:
+      self.mms_root = builder.options.mms_path
+    else:
+      self.mms_root = ResolveEnvPath('MMSOURCE11', 'mmsource-1.11')
+      if not self.mms_root:
+        self.mms_root = ResolveEnvPath('MMSOURCE11', 'metamod-1.11')
+      if not self.mms_root:
+        self.mms_root = ResolveEnvPath('MMSOURCE10', 'mmsource-1.10')
+      if not self.mms_root:
+        self.mms_root = ResolveEnvPath('MMSOURCE10', 'metamod-1.10')
+      if not self.mms_root:
+        self.mms_root = ResolveEnvPath('MMSOURCE_DEV', 'metamod-source')
+      if not self.mms_root:
+        self.mms_root = ResolveEnvPath('MMSOURCE_DEV', 'mmsource-central')
+
+    if not self.mms_root or not os.path.isdir(self.mms_root):
+      raise Exception('Could not find a source copy of Metamod:Source')
+    self.mms_root = Normalize(self.mms_root)
+	
+    if builder.options.sm_path:
+      self.sm_root = builder.options.sm_path
+    else:
+      self.sm_root = ResolveEnvPath('SOURCEMOD111', 'sourcemod-1.11')
+      if not self.sm_root:
+        self.sm_root = ResolveEnvPath('SOURCEMOD110', 'sourcemod-1.10')
+      if not self.sm_root:
+        self.sm_root = ResolveEnvPath('SOURCEMOD19', 'sourcemod-1.9')
+      if not self.sm_root:
+        self.sm_root = ResolveEnvPath('SOURCEMOD18', 'sourcemod-1.8')
+      if not self.sm_root:
+        self.sm_root = ResolveEnvPath('SOURCEMOD', 'sourcemod')
+
+    if not self.sm_root or not os.path.isdir(self.sm_root):
+      raise Exception('Could not find a source copy of Sourcemod')
+    self.sm_root = Normalize(self.sm_root)
+
+  def configure(self):
+    builder.AddConfigureFile('push.txt')
+
+    cxx = builder.DetectCxx(target_arch='x86')
+
+    builder.cxx = cxx
+
+    if cxx.like('gcc'):
+      cxx.defines += [
+        'stricmp=strcasecmp',
+        '_stricmp=strcasecmp',
+        '_snprintf=snprintf',
+        '_vsnprintf=vsnprintf',
+        'HAVE_STDINT_H',
+        'GNUC',
+      ]
+      cxx.cflags += [
+        '-pipe',
+        '-fno-strict-aliasing',
+        '-Wall',
+        '-Werror',
+        '-Wno-unused',
+        '-Wno-switch',
+        '-Wno-format',
+        '-Wno-format-security',
+        '-Wno-array-bounds',
+        '-Wno-sign-compare',
+        '-msse',
+        '-m32',
+		'-Wno-invalid-offsetof',
+      ]
+      cxx.cxxflags += [
+          '-std=c++14',
+      ]
+
+      have_gcc = cxx.family == 'gcc'
+      have_clang = cxx.family == 'clang'
+      if cxx.version >= 'clang-3.6':
+        cxx.cxxflags += ['-Wno-inconsistent-missing-override']
+      if have_clang or (have_gcc and cxx.version >= '4'):
+        cxx.cflags += ['-fvisibility=hidden']
+        cxx.cxxflags += ['-fvisibility-inlines-hidden']
+        if have_clang or (have_gcc and cxx.version >= '4.6'):
+          cxx.cflags += ['-Wno-narrowing']
+        if (have_gcc and cxx.version >= '4.7') or (have_clang and cxx.version >= '3'):
+          cxx.cxxflags += ['-Wno-delete-non-virtual-dtor']
+        if have_gcc and cxx.version >= '4.8':
+          cxx.cflags += ['-Wno-unused-result']
+      if have_clang:
+        cxx.cxxflags += ['-Wno-implicit-exception-spec-mismatch']
+        if (cxx.target.platform == 'mac' and cxx.version >= '5.1') or cxx.version >= '3.4':
+          cxx.cxxflags += ['-Wno-deprecated-register']
+        else:
+          cxx.cxxflags += ['-Wno-deprecated']
+        cxx.cflags += ['-Wno-sometimes-uninitialized']
+
+      cxx.linkflags += ['-m32']
+      cxx.cxxflags += [
+        '-fno-exceptions',
+        '-fno-threadsafe-statics',
+        '-Wno-non-virtual-dtor',
+        '-Wno-overloaded-virtual',
+      ]
+
+      if have_gcc:
+        cxx.cflags += ['-mfpmath=sse']
+    elif cxx.family == 'msvc':
+      if builder.options.debug == '1':
+        cxx.cflags += ['/MTd']
+        cxx.linkflags += ['/NODEFAULTLIB:libcmt']
+      else:
+        cxx.cflags += ['/MT']
+      cxx.defines += [
+        '_CRT_SECURE_NO_DEPRECATE',
+        '_CRT_SECURE_NO_WARNINGS',
+        '_CRT_NONSTDC_NO_DEPRECATE',
+        '_ITERATOR_DEBUG_LEVEL=0',
+      ]
+      cxx.cflags += [
+        '/W3',
+      ]
+      cxx.cxxflags += [
+        '/EHsc',
+        '/GR-',
+        '/TP',
+      ]
+      cxx.linkflags += [
+        '/MACHINE:X86',
+        '/SUBSYSTEM:WINDOWS',
+        'kernel32.lib',
+        'user32.lib',
+        'gdi32.lib',
+        'winspool.lib',
+        'comdlg32.lib',
+        'advapi32.lib',
+        'shell32.lib',
+        'ole32.lib',
+        'oleaut32.lib',
+        'uuid.lib',
+        'odbc32.lib',
+        'odbccp32.lib',
+      ] 
+
+    # Optimization
+    if builder.options.opt == '1':
+      cxx.defines += ['NDEBUG']
+      if cxx.like('gcc'):
+        cxx.cflags += ['-O3']
+      elif cxx.like('msvc'):
+        cxx.cflags += ['/Ox']
+        cxx.linkflags += ['/OPT:ICF', '/OPT:REF']
+
+    # Debugging
+    if builder.options.debug == '1':
+      cxx.defines += ['DEBUG', '_DEBUG']
+      if cxx.like('msvc'):
+        cxx.cflags += ['/Od', '/RTC1']
+        if cxx.version >= 1600:
+          cxx.cflags += ['/d2Zi+']
+
+    # This needs to be after our optimization flags which could otherwise disable it.
+    if cxx.family == 'msvc':
+      # Don't omit the frame pointer.
+      cxx.cflags += ['/Oy-']
+    elif cxx.like('gcc'):
+      # Don't omit the frame pointer.
+      cxx.cflags += ['-fno-omit-frame-pointer']
+
+    # Platform-specifics
+    if cxx.target.platform == 'linux':
+      cxx.defines += ['_LINUX', 'POSIX']
+      if cxx.family == 'gcc':
+        cxx.linkflags += ['-static-libgcc']
+      elif cxx.family == 'clang':
+        cxx.linkflags += ['-lgcc_eh']
+      cxx.linkflags += ['-static-libstdc++']
+    elif cxx.target.platform == 'mac':
+      cxx.defines += ['OSX', '_OSX', 'POSIX']
+      cxx.cflags += ['-mmacosx-version-min=10.5']
+      cxx.linkflags += [
+        '-mmacosx-version-min=10.5',
+        '-arch', 'i386',
+        '-lstdc++',
+        '-stdlib=libstdc++',
+      ]
+      cxx.cxxflags += ['-stdlib=libstdc++']
+    elif cxx.target.platform == 'windows':
+      cxx.defines += ['WIN32', '_WINDOWS']
+
+    if cxx.family == 'gcc' or cxx.family == 'clang':
+      cxx.cxxflags += ['-fno-rtti']
+    elif cxx.family == 'msvc':
+      cxx.cxxflags += ['/GR-']
+ 
+    cxx.defines += ['META_NO_HL2SDK']
+	
+  def IncludeSDKs(self, builder):
+    builder.cxx.cxxincludes += [
+      os.path.join(builder.currentSourcePath),
+      os.path.join(builder.currentSourcePath, 'sdk'),
+      os.path.join(self.mms_root, 'core'),
+      os.path.join(self.mms_root, 'core', 'sourcehook'),
+      os.path.join(self.sm_root, 'public'),
+      os.path.join(self.sm_root, 'public', 'extensions'),
+      os.path.join(self.sm_root, 'public', 'sourcepawn'),
+      os.path.join(self.sm_root, 'public', 'amtl'),
+      os.path.join(self.sm_root, 'public', 'jit'),
+      os.path.join(self.sm_root, 'public', 'jit', 'x86'),
+      os.path.join(self.sm_root, 'sourcepawn', 'include'),
+      os.path.join(self.sm_root, 'sourcepawn', 'vm'),
+      os.path.join(self.sm_root, 'sourcepawn', 'vm', 'x86'),
+      os.path.join(self.sm_root, 'public', 'amtl', 'include'),
+      os.path.join(self.sm_root, 'public', 'amtl', 'amtl'),
+      os.path.join(builder.currentSourcePath, 'DynamicHooks'),
+    ]
+	
+
+DHooks = DHooksConfig()
+DHooks.detectSDKs()
+DHooks.configure()
+DHooks.IncludeSDKs(builder)
+
+program = builder.cxx.Library('dhooks.ext')
+
+program.sources += [
+  'extension.cpp',
+  'listeners.cpp',
+  'natives.cpp',
+  'signatures.cpp',
+  'vhook.cpp',
+  'util.cpp',
+  'dynhooks_sourcepawn.cpp',
+]
+
+# DynamicHooks
+program.sources += [
+	os.path.join('DynamicHooks', 'asm.cpp'),
+	os.path.join('DynamicHooks', 'hook.cpp'),
+	os.path.join('DynamicHooks', 'manager.cpp'),
+	os.path.join('DynamicHooks', 'registers.cpp'),
+	os.path.join('DynamicHooks', 'utilities.cpp'),
+	os.path.join('DynamicHooks', 'conventions', 'x86MsCdecl.cpp'),
+	os.path.join('DynamicHooks', 'conventions', 'x86MsStdcall.cpp'),
+	os.path.join('DynamicHooks', 'conventions', 'x86MsFastcall.cpp'),
+]
+
+if builder.cxx.target.platform == 'windows':
+	program.sources += [os.path.join('DynamicHooks', 'conventions', 'x86MsThiscall.cpp')]
+else:
+	program.sources += [os.path.join('DynamicHooks', 'conventions', 'x86GccThiscall.cpp')]
+
+program.sources += [os.path.join(DHooks.sm_root, 'public', 'smsdk_ext.cpp')]
+
+if os.path.isfile(os.path.join(DHooks.sm_root, 'sourcepawn', 'vm', 'x86', 'assembler-x86.cpp')):
+  program.sources += [os.path.join(DHooks.sm_root, 'sourcepawn', 'vm', 'x86', 'assembler-x86.cpp'),]
+elif os.path.isfile(os.path.join(DHooks.sm_root, 'public', 'jit', 'x86', 'assembler-x86.cpp')):
+  program.sources += [os.path.join(DHooks.sm_root, 'public', 'jit', 'x86', 'assembler-x86.cpp'),]
+else:
+  raise Exception('Could not find assembler-x86.cpp.  Did you checkout SourceMod\'s submodules?')
+
+DHooks.task = builder.Add(program)
+
+builder.Build('buildbot/PackageScript', { 'DHooks': DHooks })

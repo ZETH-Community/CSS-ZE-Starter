@@ -1,0 +1,91 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="..\vhook.cpp" />
+    <ClCompile Include="..\extension.cpp" />
+    <ClCompile Include="..\natives.cpp" />
+    <ClCompile Include="..\listeners.cpp" />
+    <ClCompile Include="..\util.cpp" />
+    <ClCompile Include="$(SOURCEMOD)\public\smsdk_ext.cpp">
+      <Filter>sdk</Filter>
+    </ClCompile>
+    <ClCompile Include="$(SOURCEMOD)\sourcepawn\vm\x86\assembler-x86.cpp">
+      <Filter>JIT</Filter>
+    </ClCompile>
+    <ClCompile Include="..\dynhooks_sourcepawn.cpp" />
+    <ClCompile Include="..\DynamicHooks\asm.cpp">
+      <Filter>DynamicHooks</Filter>
+    </ClCompile>
+    <ClCompile Include="..\DynamicHooks\hook.cpp">
+      <Filter>DynamicHooks</Filter>
+    </ClCompile>
+    <ClCompile Include="..\DynamicHooks\manager.cpp">
+      <Filter>DynamicHooks</Filter>
+    </ClCompile>
+    <ClCompile Include="..\DynamicHooks\registers.cpp">
+      <Filter>DynamicHooks</Filter>
+    </ClCompile>
+    <ClCompile Include="..\DynamicHooks\utilities.cpp">
+      <Filter>DynamicHooks</Filter>
+    </ClCompile>
+    <ClCompile Include="..\DynamicHooks\conventions\x86MsCdecl.cpp">
+      <Filter>DynamicHooks\conventions</Filter>
+    </ClCompile>
+    <ClCompile Include="..\DynamicHooks\conventions\x86MsStdcall.cpp">
+      <Filter>DynamicHooks\conventions</Filter>
+    </ClCompile>
+    <ClCompile Include="..\DynamicHooks\conventions\x86MsThiscall.cpp">
+      <Filter>DynamicHooks\conventions</Filter>
+    </ClCompile>
+    <ClCompile Include="..\signatures.cpp" />
+    <ClCompile Include="..\DynamicHooks\conventions\x86MsFastcall.cpp">
+      <Filter>DynamicHooks\conventions</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="..\extension.h">
+      <Filter>Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="..\vhook.h">
+      <Filter>Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="..\sdk\smsdk_config.h">
+      <Filter>sdk</Filter>
+    </ClInclude>
+    <ClInclude Include="..\natives.h">
+      <Filter>Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="..\listeners.h">
+      <Filter>Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="..\vfunc_call.h">
+      <Filter>Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="..\sdk-hacks.h">
+      <Filter>Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="..\util.h">
+      <Filter>Headers</Filter>
+    </ClInclude>
+    <ClInclude Include="$(SOURCEMOD)\public\smsdk_ext.h">
+      <Filter>sdk</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Headers">
+      <UniqueIdentifier>{dcea02e7-7dfe-4bd2-9e97-d58b3c166cbb}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sdk">
+      <UniqueIdentifier>{8a0b4570-752f-44d9-b270-ef886743e9ea}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="JIT">
+      <UniqueIdentifier>{9ac7d92a-8a9d-4e7c-b108-09d915244278}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="DynamicHooks">
+      <UniqueIdentifier>{3890da14-9ad1-40fa-9d3e-086470be057f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="DynamicHooks\conventions">
+      <UniqueIdentifier>{fd087576-16c9-419d-a3a2-98faaf5dada6}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
