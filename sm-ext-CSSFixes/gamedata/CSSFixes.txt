@@ -1,0 +1,74 @@
+"Games"
+{
+	"#default"
+	{
+		"Signatures"
+		{
+			"CBaseFilter_InputTestActivator"
+			{
+				"library"	"server"
+				"linux"		"@_ZN11CBaseFilter18InputTestActivatorER11inputdata_t"
+			}
+
+			"CBaseEntity_PostConstructor"
+			{
+				"library"	"server"
+				"linux"		"@_ZN11CBaseEntity15PostConstructorEPKc"
+			}
+
+			"CBasePlayer_FindUseEntity"
+			{
+				"library"	"server"
+				"linux"		"@_ZN11CBasePlayer13FindUseEntityEv"
+			}
+
+			"CTraceFilterSimple_CTraceFilterSimple"
+			{
+				"library"	"server"
+				"linux"		"@_ZN18CTraceFilterSimpleC2EPK13IHandleEntityiPFbPS0_iE"
+			}
+
+			"CTraceFilterNoNPCsOrPlayer"
+			{
+				"library"	"server"
+				"linux"		"@_ZTV26CTraceFilterNoNPCsOrPlayer"
+			}
+
+			"CTraceFilterSkipTwoEntities"
+			{
+				"library"	"server"
+				"linux"		"@_ZTV27CTraceFilterSkipTwoEntities"
+			}
+
+			"CTraceFilterSimple"
+			{
+				"library"	"server"
+				"linux"		"@_ZTV18CTraceFilterSimple"
+			}
+
+			"CTraceFilterSkipTwoEntities_CTraceFilterSkipTwoEntities"
+			{
+				"library"	"server"
+				"linux"		"@_ZN27CTraceFilterSkipTwoEntitiesC2EPK13IHandleEntityS2_i"
+			}
+
+			"CBaseEntity_KeyValue"
+			{
+				"library"	"server"
+				"linux"		"@_ZN11CBaseEntity8KeyValueEPKcS1_"
+			}
+
+			"FX_FireBullets"
+			{
+				"library"	"server"
+				"linux"		"@_Z14FX_FireBulletsiRK6VectorRK6QAngleiiifff"
+			}
+
+			"CKnife_SwingOrStab"
+			{
+				"library"	"server"
+				"linux"		"@_ZN6CKnife11SwingOrStabEb"
+			}
+		}
+	}
+}
