@@ -11,6 +11,7 @@ All source file of extensions can be found here: https://git.botox.bz/CSSZombieE
 Do not install sm-ext-A2QCache and sm-ext-connect in the same server. This might causing maptracker issues and make your server offline in maptracker.
 
 So if you have a plan to host NoSteam server, You have to install sm-ext-connect, but do not install sm-ext-A2QCache.
+
 If you have a plan to host Steam only server, You can install sm-ext-A2QCache as optional, but do not install sm-ext-connect.
 
 ### All credits to BOTOX!
