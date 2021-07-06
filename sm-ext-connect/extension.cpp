@@ -30,6 +30,7 @@
  */
 
 #include "extension.h"
+#include "extensionHelper.h"
 #include "CDetour/detours.h"
 #include "steam/steam_gameserver.h"
 #include "sm_namehashset.h"
@@ -45,6 +46,7 @@
 #include <inetchannelinfo.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <sstream>
 
 size_t
 strlcpy(char *dst, const char *src, size_t dsize)
@@ -82,17 +84,21 @@ ConnectTimer g_ConnectTimer;
 
 SMEXT_LINK(&g_Connect);
 
-ConVar g_ConnectVersion("connect_version", SMEXT_CONF_VERSION, FCVAR_REPLICATED|FCVAR_NOTIFY, SMEXT_CONF_DESCRIPTION " Version");
-ConVar g_SvNoSteam("sv_nosteam", "0", FCVAR_NOTIFY, "Disable steam validation and force steam authentication.");
-ConVar g_SvForceSteam("sv_forcesteam", "0", FCVAR_NOTIFY, "Force steam authentication.");
-ConVar g_SvLogging("sv_connect_logging", "0", FCVAR_NOTIFY, "Log connection checks");
-ConVar g_SvGameDesc("sv_gamedesc_override", "default", FCVAR_NOTIFY, "Overwrite the game description. Default = 'default'");
-ConVar g_SvMapName("sv_mapname_override", "default", FCVAR_NOTIFY, "Overwrite the map name. Default = 'default'");
+ConVar *g_ConnectVersion = CreateConVar("connect_version", SMEXT_CONF_VERSION, FCVAR_REPLICATED|FCVAR_NOTIFY, SMEXT_CONF_DESCRIPTION " Version");
+ConVar *g_SvNoSteam = CreateConVar("sv_nosteam", "1", FCVAR_NOTIFY, "Disable steam validation and force steam authentication.");
+ConVar *g_SvForceSteam = CreateConVar("sv_forcesteam", "0", FCVAR_NOTIFY, "Force steam authentication.");
+ConVar *g_SvLogging = CreateConVar("sv_connect_logging", "0", FCVAR_NOTIFY, "Log connection checks");
+ConVar *g_SvGameDesc = CreateConVar("sv_gamedesc_override", "default", FCVAR_NOTIFY, "Overwrite the game description. Default = 'default'");
+ConVar *g_SvMapName = CreateConVar("sv_mapname_override", "default", FCVAR_NOTIFY, "Overwrite the map name. Default = 'default'");
+ConVar *g_SvCountBotsInfo = CreateConVar("sv_count_bots_info", "1", FCVAR_NOTIFY, "Display bots as players in the a2s_info server query. Enable = '1', Disable = '0'");
+ConVar *g_SvCountBotsPlayer = CreateConVar("sv_count_bots_player", "0", FCVAR_NOTIFY, "Display bots as players in the a2s_player server query. Enable = '1', Disable = '0'");
+ConVar *g_SvAuthSessionResponseLegal = CreateConVar("sv_auth_session_response_legal", "0,1,2,3,4,5,7,9", FCVAR_NOTIFY, "List of EAuthSessionResponse that are considered as Steam legal (Defined in steam_api_interop.cs).");
 ConVar *g_pSvVisibleMaxPlayers;
 ConVar *g_pSvTags;
 
 IGameConfig *g_pGameConf = NULL;
 IForward *g_pConnectForward = NULL;
+IForward *g_pOnValidateAuthTicketResponse = NULL;
 IGameEventManager2 *g_pGameEvents = NULL;
 ITimer *g_pConnectTimer = NULL;
 ISDKTools *g_pSDKTools = NULL;
@@ -135,58 +141,70 @@ void *s_queryRateChecker = NULL;
 bool (*CIPRateLimit__CheckIP)(void *pThis, netadr_t adr);
 bool (*CBaseServer__ValidChallenge)(void *pThis, netadr_t adr, int challengeNr);
 
-struct CQueryCache
+typedef struct CPlayer
 {
-	struct CPlayer
-	{
-		bool active;
-		bool fake;
-		int userid;
-		IClient *pClient;
-		char name[MAX_PLAYER_NAME_LENGTH];
-		unsigned nameLen;
-		int32_t score;
-		double time;
-	} players[SM_MAXPLAYERS + 1];
+	bool active;
+	bool fake;
+	int userid;
+	IClient *pClient;
+	char name[MAX_PLAYER_NAME_LENGTH];
+	unsigned nameLen;
+	int32_t score;
+	double time;
+} CPlayer;
 
-	struct CInfo
-	{
-		uint8_t nProtocol = 17; // Protocol | byte | Protocol version used by the server.
-		char aHostName[255]; // Name | string | Name of the server.
-		uint8_t aHostNameLen;
-		char aMapName[255]; // Map | string | Map the server has currently loaded.
-		uint8_t aMapNameLen;
-		char aGameDir[255]; // Folder | string | Name of the folder containing the game files.
-		uint8_t aGameDirLen;
-		char aGameDescription[255]; // Game | string | Full name of the game.
-		uint8_t aGameDescriptionLen;
-		uint16_t iSteamAppID; // ID | short | Steam Application ID of game.
-		uint8_t nNumClients = 0; // Players | byte | Number of players on the server.
-		uint8_t nMaxClients; // Max. Players | byte | Maximum number of players the server reports it can hold.
-		uint8_t nFakeClients = 0; // Bots | byte | Number of bots on the server.
-		uint8_t nServerType = 'd'; // Server type | byte | Indicates the type of server: 'd' for a dedicated server, 'l' for a non-dedicated server, 'p' for a SourceTV relay (proxy)
-		uint8_t nEnvironment = 'l'; // Environment | byte | Indicates the operating system of the server: 'l' for Linux, 'w' for Windows, 'm' or 'o' for Mac (the code changed after L4D1)
-		uint8_t nPassword; // Visibility | byte | Indicates whether the server requires a password: 0 for public, 1 for private
-		uint8_t bIsSecure; // VAC | byte | Specifies whether the server uses VAC: 0 for unsecured, 1 for secured
-		char aVersion[40]; // Version | string | Version of the game installed on the server.
-		uint8_t aVersionLen;
-		uint8_t nNewFlags = 0; // Extra Data Flag (EDF) | byte | If present, this specifies which additional data fields will be included.
-		uint16_t iUDPPort; // EDF & 0x80 -> Port | short | The server's game port number.
-		uint64_t iSteamID; // EDF & 0x10 -> SteamID | long long | Server's SteamID.
-		uint16_t iHLTVUDPPort; // EDF & 0x40 -> Port | short | Spectator port number for SourceTV.
-		char aHLTVName[255]; // EDF & 0x40 -> Name | string | Name of the spectator server for SourceTV.
-		uint8_t aHLTVNameLen;
-		char aKeywords[255]; // EDF & 0x20 -> Keywords | string | Tags that describe the game according to the server (for future use.) (sv_tags)
-		uint8_t aKeywordsLen;
-		uint64_t iGameID; // EDF & 0x01 -> GameID | long long | The server's 64-bit GameID. If this is present, a more accurate AppID is present in the low 24 bits. The earlier AppID could have been truncated as it was forced into 16-bit storage.
-	} info;
+typedef struct CInfo
+{
+	uint8_t nProtocol = 17; // Protocol | byte | Protocol version used by the server.
+	char aHostName[255]; // Name | string | Name of the server.
+	uint8_t aHostNameLen;
+	char aMapName[255]; // Map | string | Map the server has currently loaded.
+	uint8_t aMapNameLen;
+	char aGameDir[255]; // Folder | string | Name of the folder containing the game files.
+	uint8_t aGameDirLen;
+	char aGameDescription[255]; // Game | string | Full name of the game.
+	uint8_t aGameDescriptionLen;
+	uint16_t iSteamAppID; // ID | short | Steam Application ID of game.
+	uint8_t nNumClients = 0; // Players | byte | Number of players on the server.
+	uint8_t nMaxClients; // Max. Players | byte | Maximum number of players the server reports it can hold.
+	uint8_t nFakeClients = 0; // Bots | byte | Number of bots on the server.
+	uint8_t nServerType = 'd'; // Server type | byte | Indicates the type of server: 'd' for a dedicated server, 'l' for a non-dedicated server, 'p' for a SourceTV relay (proxy)
+	uint8_t nEnvironment = 'l'; // Environment | byte | Indicates the operating system of the server: 'l' for Linux, 'w' for Windows, 'm' or 'o' for Mac (the code changed after L4D1)
+	uint8_t nPassword; // Visibility | byte | Indicates whether the server requires a password: 0 for public, 1 for private
+	uint8_t bIsSecure; // VAC | byte | Specifies whether the server uses VAC: 0 for unsecured, 1 for secured
+	char aVersion[40]; // Version | string | Version of the game installed on the server.
+	uint8_t aVersionLen;
+	uint8_t nNewFlags = 0; // Extra Data Flag (EDF) | byte | If present, this specifies which additional data fields will be included.
+	uint16_t iUDPPort; // EDF & 0x80 -> Port | short | The server's game port number.
+	uint64_t iSteamID; // EDF & 0x10 -> SteamID | long long | Server's SteamID.
+	uint16_t iHLTVUDPPort; // EDF & 0x40 -> Port | short | Spectator port number for SourceTV.
+	char aHLTVName[255]; // EDF & 0x40 -> Name | string | Name of the spectator server for SourceTV.
+	uint8_t aHLTVNameLen;
+	char aKeywords[255]; // EDF & 0x20 -> Keywords | string | Tags that describe the game according to the server (for future use.) (sv_tags)
+	uint8_t aKeywordsLen;
+	uint64_t iGameID; // EDF & 0x01 -> GameID | long long | The server's 64-bit GameID. If this is present, a more accurate AppID is present in the low 24 bits. The earlier AppID could have been truncated as it was forced into 16-bit storage.
+} CInfo;
+
+typedef struct CQueryCache
+{
+	CPlayer players[SM_MAXPLAYERS + 1];
+	CInfo info;
 
 	uint8_t info_cache[sizeof(CInfo)] = {0xFF, 0xFF, 0xFF, 0xFF, 'I'};
 	uint16_t info_cache_len;
-} g_QueryCache;
+} CQueryCache;
+
+CQueryCache g_QueryCache;
 
 class CBaseClient;
 class CBaseServer;
+
+typedef enum EConnect
+{
+	k_OnClientPreConnectEx_Reject = 0,
+	k_OnClientPreConnectEx_Accept = 1,
+	k_OnClientPreConnectEx_Async = -1
+} EConnect;
 
 typedef enum EAuthProtocol
 {
@@ -205,11 +223,15 @@ const char *CSteamID::Render() const
 class CSteam3Server
 {
 public:
+	void *m_pSteamClient;
 	ISteamGameServer *m_pSteamGameServer;
 	void *m_pSteamGameServerUtils;
 	void *m_pSteamGameServerNetworking;
 	void *m_pSteamGameServerStats;
 	void *m_pSteamHTTP;
+	void *m_pSteamInventory;
+	void *m_pSteamUGC;
+	void *m_pSteamApps;
 } *g_pSteam3Server;
 
 CBaseServer *g_pBaseServer = NULL;
@@ -320,11 +342,18 @@ public:
 
 	uint64 ullSteamID;
 	ValidateAuthTicketResponse_t ValidateAuthTicketResponse;
+	EAuthSessionResponse eAuthSessionResponse;
 	bool GotValidateAuthTicketResponse;
 	bool SteamLegal;
 	bool SteamAuthFailed;
 
-	ConnectClientStorage() { }
+	ConnectClientStorage()
+	{
+		this->GotValidateAuthTicketResponse = false;
+		this->SteamLegal = false;
+		this->SteamAuthFailed = false;
+		this->eAuthSessionResponse = k_EAuthSessionResponseAuthTicketInvalid;
+	}
 	ConnectClientStorage(netadr_t address, int nProtocol, int iChallenge, int iClientChallenge, int nAuthProtocol, const char *pchName, const char *pchPassword, const char *pCookie, int cbCookie)
 	{
 		this->address = address;
@@ -340,6 +369,7 @@ public:
 		this->GotValidateAuthTicketResponse = false;
 		this->SteamLegal = false;
 		this->SteamAuthFailed = false;
+		this->eAuthSessionResponse = k_EAuthSessionResponseAuthTicketInvalid;
 	}
 };
 StringHashMap<ConnectClientStorage> g_ConnectClientStorage;
@@ -348,15 +378,41 @@ bool g_bEndAuthSessionOnRejectConnection = false;
 CSteamID g_lastClientSteamID;
 bool g_bSuppressCheckChallengeType = false;
 
+bool IsAuthSessionResponseSteamLegal(EAuthSessionResponse eAuthSessionResponse)
+{
+	std::stringstream ss(g_SvAuthSessionResponseLegal->GetString());
+	int legalAuthSessionResponse[10];
+	char ch;
+	int n;
+	int size = 0;
+
+	while(ss >> n)
+	{
+		if(ss >> ch)
+			legalAuthSessionResponse[size] = n;
+		else
+			legalAuthSessionResponse[size] = n;
+		size++;
+	}
+
+	for (int y = 0; y < size; y++)
+	{
+	    if (eAuthSessionResponse == legalAuthSessionResponse[y])
+	        return true;
+	}
+	return false;
+}
+
 DETOUR_DECL_MEMBER1(CSteam3Server__OnValidateAuthTicketResponse, int, ValidateAuthTicketResponse_t *, pResponse)
 {
 	char aSteamID[32];
 	strlcpy(aSteamID, pResponse->m_SteamID.Render(), sizeof(aSteamID));
 
-	bool SteamLegal = pResponse->m_eAuthSessionResponse == k_EAuthSessionResponseOK;
-	bool force = g_SvNoSteam.GetInt() || g_SvForceSteam.GetInt() || !BLoggedOn();
+	EAuthSessionResponse eAuthSessionResponse = pResponse->m_eAuthSessionResponse;
+	bool SteamLegal = IsAuthSessionResponseSteamLegal(pResponse->m_eAuthSessionResponse);
+	bool force = g_SvNoSteam->GetInt() || g_SvForceSteam->GetInt() || !BLoggedOn();
 
-	if (g_SvLogging.GetInt())
+	if (g_SvLogging->GetInt())
 		g_pSM->LogMessage(myself, "%s SteamLegal: %d (%d)", aSteamID, SteamLegal, pResponse->m_eAuthSessionResponse);
 
 	if(!SteamLegal && force)
@@ -370,9 +426,16 @@ DETOUR_DECL_MEMBER1(CSteam3Server__OnValidateAuthTicketResponse, int, ValidateAu
 			Storage.GotValidateAuthTicketResponse = true;
 			Storage.ValidateAuthTicketResponse = *pResponse;
 			Storage.SteamLegal = SteamLegal;
+			Storage.eAuthSessionResponse = eAuthSessionResponse;
 			g_ConnectClientStorage.replace(aSteamID, Storage);
 		}
 	}
+
+	g_pOnValidateAuthTicketResponse->PushCell(Storage.eAuthSessionResponse);
+	g_pOnValidateAuthTicketResponse->PushCell(Storage.GotValidateAuthTicketResponse);
+	g_pOnValidateAuthTicketResponse->PushCell(Storage.SteamLegal);
+	g_pOnValidateAuthTicketResponse->PushStringEx(aSteamID, sizeof(aSteamID), SM_PARAM_STRING_UTF8 | SM_PARAM_STRING_COPY, SM_PARAM_COPYBACK);
+	g_pOnValidateAuthTicketResponse->Execute();
 
 	return DETOUR_MEMBER_CALL(CSteam3Server__OnValidateAuthTicketResponse)(pResponse);
 }
@@ -427,7 +490,7 @@ DETOUR_DECL_MEMBER9(CBaseServer__ConnectClient, IClient *, netadr_t &, address, 
 			AsyncWaiting = true;
 	}
 
-	bool NoSteam = g_SvNoSteam.GetInt() || !BLoggedOn();
+	bool NoSteam = g_SvNoSteam->GetInt() || !BLoggedOn();
 	bool SteamAuthFailed = false;
 	EBeginAuthSessionResult result = BeginAuthSession(pvTicket, cbTicket, g_lastClientSteamID);
 	if(result != k_EBeginAuthSessionResultOK)
@@ -481,11 +544,10 @@ DETOUR_DECL_MEMBER9(CBaseServer__ConnectClient, IClient *, netadr_t &, address, 
 		pchPassword = passwordBuffer;
 	}
 
-	if (g_SvLogging.GetInt())
+	if (g_SvLogging->GetInt())
 		g_pSM->LogMessage(myself, "%s SteamAuthFailed: %d (%d) | retVal = %d", aSteamID, SteamAuthFailed, result, retVal);
 
-	// k_OnClientPreConnectEx_Reject
-	if(retVal == 0)
+	if(retVal == k_OnClientPreConnectEx_Reject)
 	{
 		g_ConnectClientStorage.remove(aSteamID);
 		RejectConnection(address, iClientChallenge, rejectReason);
@@ -502,8 +564,7 @@ DETOUR_DECL_MEMBER9(CBaseServer__ConnectClient, IClient *, netadr_t &, address, 
 		return NULL;
 	}
 
-	// k_OnClientPreConnectEx_Async
-	if(retVal == -1)
+	if(retVal == k_OnClientPreConnectEx_Async)
 	{
 		return NULL;
 	}
@@ -577,18 +638,18 @@ DETOUR_DECL_MEMBER0(CBaseServer__InactivateClients, void)
 
 void UpdateQueryCache()
 {
-	CQueryCache::CInfo &info = g_QueryCache.info;
+	CInfo &info = g_QueryCache.info;
 	info.aHostNameLen = strlcpy(info.aHostName, iserver->GetName(), sizeof(info.aHostName));
 
-	if(strcmp(g_SvMapName.GetString(), "default") == 0)
+	if(strcmp(g_SvMapName->GetString(), "default") == 0)
 		info.aMapNameLen = strlcpy(info.aMapName, iserver->GetMapName(), sizeof(info.aMapName));
 	else
-		info.aMapNameLen = strlcpy(info.aMapName, g_SvMapName.GetString(), sizeof(info.aMapName));
+		info.aMapNameLen = strlcpy(info.aMapName, g_SvMapName->GetString(), sizeof(info.aMapName));
 
-	if(strcmp(g_SvGameDesc.GetString(), "default") == 0)
+	if(strcmp(g_SvGameDesc->GetString(), "default") == 0)
 		info.aGameDescriptionLen = strlcpy(info.aGameDescription, gamedll->GetGameDescription(), sizeof(info.aGameDescription));
 	else
-		info.aGameDescriptionLen = strlcpy(info.aGameDescription, g_SvGameDesc.GetString(), sizeof(info.aGameDescription));
+		info.aGameDescriptionLen = strlcpy(info.aGameDescription, g_SvGameDesc->GetString(), sizeof(info.aGameDescription));
 
 	if(g_pSvVisibleMaxPlayers->GetInt() >= 0)
 		info.nMaxClients = g_pSvVisibleMaxPlayers->GetInt();
@@ -649,7 +710,10 @@ void UpdateQueryCache()
 
 	info_cache[pos++] = info.nMaxClients;
 
-	info_cache[pos++] = 0;//info.nFakeClients;
+	if (g_SvCountBotsInfo->GetInt())
+		info_cache[pos++] = 0;
+	else
+		info_cache[pos++] = info.nFakeClients;
 
 	info_cache[pos++] = info.nServerType;
 
@@ -745,8 +809,8 @@ bool Hook_ProcessConnectionlessPacket(netpacket_t * packet)
 		short pos = 6;
 		for(int i = 1; i <= SM_MAXPLAYERS; i++)
 		{
-			const CQueryCache::CPlayer &player = g_QueryCache.players[i];
-			if(!player.active)
+			const CPlayer &player = g_QueryCache.players[i];
+			if(!player.active || (player.fake && !g_SvCountBotsPlayer->GetInt()))
 				continue;
 
 			response[pos++] = response[5]; // Index | byte | Index of player chunk starting from 0.
@@ -901,12 +965,15 @@ bool Connect::SDK_OnLoad(char *error, size_t maxlen, bool late)
 	g_Detour_CSteam3Server__OnValidateAuthTicketResponse->EnableDetour();
 
 	g_pConnectForward = g_pForwards->CreateForward("OnClientPreConnectEx", ET_LowEvent, 5, NULL, Param_String, Param_String, Param_String, Param_String, Param_String);
+	g_pOnValidateAuthTicketResponse = g_pForwards->CreateForward("OnValidateAuthTicketResponse", ET_Ignore, 4, NULL, Param_Cell, Param_Cell, Param_Cell, Param_String);
 
 	g_pGameEvents->AddListener(&g_ConnectEvents, "player_connect", true);
 	g_pGameEvents->AddListener(&g_ConnectEvents, "player_disconnect", true);
 	g_pGameEvents->AddListener(&g_ConnectEvents, "player_changename", true);
 
 	playerhelpers->AddClientListener(this);
+
+	AutoExecConfig(g_pCVar, true);
 
 	return true;
 }
@@ -932,6 +999,9 @@ void Connect::SDK_OnUnload()
 {
 	if(g_pConnectForward)
 		g_pForwards->ReleaseForward(g_pConnectForward);
+
+	if(g_pOnValidateAuthTicketResponse)
+		g_pForwards->ReleaseForward(g_pOnValidateAuthTicketResponse);
 
 	if(g_Detour_CBaseServer__ConnectClient)
 	{
@@ -1002,12 +1072,12 @@ cell_t ClientPreConnectEx(IPluginContext *pContext, const cell_t *params)
 	if(!pClient)
 		return 1;
 
-	bool force = g_SvNoSteam.GetInt() || g_SvForceSteam.GetInt() || !BLoggedOn();
+	bool force = g_SvNoSteam->GetInt() || g_SvForceSteam->GetInt() || !BLoggedOn();
 
 
 	if(Storage.SteamAuthFailed && force && !Storage.GotValidateAuthTicketResponse)
 	{
-		if (g_SvLogging.GetInt())
+		if (g_SvLogging->GetInt())
 			g_pSM->LogMessage(myself, "%s Force ValidateAuthTicketResponse", pSteamID);
 
 		Storage.ValidateAuthTicketResponse.m_SteamID = CSteamID(Storage.ullSteamID);
@@ -1019,7 +1089,7 @@ cell_t ClientPreConnectEx(IPluginContext *pContext, const cell_t *params)
 	// Make sure this is always called in order to verify the client on the server
 	if(Storage.GotValidateAuthTicketResponse)
 	{
-		if (g_SvLogging.GetInt())
+		if (g_SvLogging->GetInt())
 			g_pSM->LogMessage(myself, "%s Replay ValidateAuthTicketResponse", pSteamID);
 
 		DETOUR_MEMBER_MCALL_ORIGINAL(CSteam3Server__OnValidateAuthTicketResponse, g_pSteam3Server)(&Storage.ValidateAuthTicketResponse);
@@ -1034,23 +1104,33 @@ cell_t SteamClientAuthenticated(IPluginContext *pContext, const cell_t *params)
 	pContext->LocalToString(params[1], &pSteamID);
 
 	ConnectClientStorage Storage;
-	if(g_ConnectClientStorage.retrieve(pSteamID, &Storage))
-	{
-		if (g_SvLogging.GetInt())
-			g_pSM->LogMessage(myself, "%s SteamClientAuthenticated: %d", pSteamID, Storage.SteamLegal);
+	g_ConnectClientStorage.retrieve(pSteamID, &Storage);
 
-		return Storage.SteamLegal;
-	}
-	if (g_SvLogging.GetInt())
-		g_pSM->LogMessage(myself, "%s SteamClientAuthenticated: FALSE!", pSteamID);
+	if (g_SvLogging->GetInt())
+		g_pSM->LogMessage(myself, "%s SteamClientAuthenticated: %d", pSteamID, Storage.SteamLegal);
 
-	return false;
+	return Storage.SteamLegal;
+}
+
+cell_t SteamClientGotValidateAuthTicketResponse(IPluginContext *pContext, const cell_t *params)
+{
+	char *pSteamID;
+	pContext->LocalToString(params[1], &pSteamID);
+
+	ConnectClientStorage Storage;
+	g_ConnectClientStorage.retrieve(pSteamID, &Storage);
+
+	if (g_SvLogging->GetInt())
+		g_pSM->LogMessage(myself, "%s SteamClientGotValidateAuthTicketResponse: %d", pSteamID, Storage.GotValidateAuthTicketResponse);
+
+	return Storage.GotValidateAuthTicketResponse;
 }
 
 const sp_nativeinfo_t MyNatives[] =
 {
 	{ "ClientPreConnectEx", ClientPreConnectEx },
 	{ "SteamClientAuthenticated", SteamClientAuthenticated },
+	{ "SteamClientGotValidateAuthTicketResponse", SteamClientGotValidateAuthTicketResponse},
 	{ NULL, NULL }
 };
 
@@ -1092,7 +1172,7 @@ void Connect::SDK_OnAllLoaded()
 	g_pConnectTimer = timersys->CreateTimer(&g_ConnectTimer, 1.0, NULL, TIMER_FLAG_REPEAT);
 
 	// A2S_INFO
-	CQueryCache::CInfo &info = g_QueryCache.info;
+	CInfo &info = g_QueryCache.info;
 	info.aGameDirLen = strlcpy(info.aGameDir, smutils->GetGameFolderName(), sizeof(info.aGameDir));
 
 	info.iSteamAppID = engine->GetAppID();
@@ -1112,10 +1192,10 @@ void Connect::SDK_OnAllLoaded()
 	{
 		int client = slot + 1;
 		IClient *pClient = iserver->GetClient(slot);
-		if(!pClient)
+		if(!pClient || !pClient->IsConnected())
 			continue;
 
-		CQueryCache::CPlayer &player = g_QueryCache.players[client];
+		CPlayer &player = g_QueryCache.players[client];
 		IGamePlayer *gplayer = playerhelpers->GetGamePlayer(client);
 
 		if(!player.active)
@@ -1155,7 +1235,7 @@ void Connect::OnClientSettingsChanged(int client)
 {
 	if(client >= 1 && client <= SM_MAXPLAYERS)
 	{
-		CQueryCache::CPlayer &player = g_QueryCache.players[client];
+		CPlayer &player = g_QueryCache.players[client];
 		if(player.active && player.pClient)
 			player.nameLen = strlcpy(player.name, player.pClient->GetClientName(), sizeof(player.name));
 	}
@@ -1165,7 +1245,7 @@ void Connect::OnClientPutInServer(int client)
 {
 	if(client >= 1 && client <= SM_MAXPLAYERS)
 	{
-		CQueryCache::CPlayer &player = g_QueryCache.players[client];
+		CPlayer &player = g_QueryCache.players[client];
 		IGamePlayer *gplayer = playerhelpers->GetGamePlayer(client);
 		if(player.active && player.fake && gplayer->IsSourceTV())
 		{
@@ -1179,7 +1259,7 @@ void Connect::OnTimer()
 {
 	for(int client = 1; client <= SM_MAXPLAYERS; client++)
 	{
-		CQueryCache::CPlayer &player = g_QueryCache.players[client];
+		CPlayer &player = g_QueryCache.players[client];
 		if(!player.active)
 			continue;
 
@@ -1195,6 +1275,80 @@ void Connect::OnTimer()
 	UpdateQueryCache();
 }
 
+void PlayerConnect(const int client, const int userid, const bool bot, const char *name)
+{
+	if (g_SvLogging->GetInt())
+		g_pSM->LogMessage(myself, "player_connect(client=%d, userid=%d, bot=%d, name=%s)", client, userid, bot, name);
+
+	if(client >= 1 && client <= SM_MAXPLAYERS)
+	{
+		CPlayer &player = g_QueryCache.players[client];
+
+		player.active = true;
+		player.fake = false;
+		player.pClient = iserver->GetClient(client - 1);
+		g_QueryCache.info.nNumClients++;
+		if(bot)
+		{
+			player.fake = true;
+			g_QueryCache.info.nFakeClients++;
+		}
+		player.time = *net_time;
+		player.score = 0;
+		player.nameLen = strlcpy(player.name, player.pClient->GetClientName(), sizeof(player.name));
+
+		g_UserIDtoClientMap[userid] = client;
+
+		if (g_SvLogging->GetInt())
+			g_pSM->LogMessage(myself, "\tCPlayer(active=%d, fake=%d, pClient=%p, name=%s)", player.active, player.fake, player.pClient, player.name);
+	}
+}
+
+void PlayerChangeName(const int userid)
+{
+	const int client = g_UserIDtoClientMap[userid];
+
+	g_Connect.OnClientSettingsChanged(client);
+}
+
+void PlayerDisconnect(const int userid)
+{
+	const int client = g_UserIDtoClientMap[userid];
+	g_UserIDtoClientMap[userid] = 0;
+
+	if (g_SvLogging->GetInt())
+		g_pSM->LogMessage(myself, "player_disconnect(userid=%d, client=%d)", userid, client);
+
+	if(client >= 1 && client <= SM_MAXPLAYERS)
+	{
+		CPlayer &player = g_QueryCache.players[client];
+		if (g_SvLogging->GetInt())
+			g_pSM->LogMessage(myself, "\tCPlayer(active=%d, fake=%d, pClient=%p, name=%s)", player.active, player.fake, player.pClient, player.name);
+
+		if(player.active)
+		{
+			g_QueryCache.info.nNumClients--;
+			if(player.fake)
+				g_QueryCache.info.nFakeClients--;
+		}
+		player.active = false;
+		player.pClient = NULL;
+	}
+
+	if(client >= 1 && client <= SM_MAXPLAYERS)
+	{
+		char *pSteamID = g_ClientSteamIDMap[client];
+		if(*pSteamID)
+		{
+			if (g_SvLogging->GetInt())
+				g_pSM->LogMessage(myself, "%s OnClientDisconnecting: %d", pSteamID, client);
+
+			g_ConnectClientStorage.remove(pSteamID);
+			*pSteamID = 0;
+		}
+	}
+}
+
 void ConnectEvents::FireGameEvent(IGameEvent *event)
 {
 	const char *name = event->GetName();
@@ -1205,78 +1359,17 @@ void ConnectEvents::FireGameEvent(IGameEvent *event)
 		const int userid = event->GetInt("userid");
 		const bool bot = event->GetBool("bot");
 		const char *name = event->GetString("name");
-
-		if (g_SvLogging.GetInt())
-			g_pSM->LogMessage(myself, "player_connect(client=%d, userid=%d, bot=%d, name=%s)", client, userid, bot, name);
-
-		if(client >= 1 && client <= SM_MAXPLAYERS)
-		{
-			CQueryCache::CPlayer &player = g_QueryCache.players[client];
-
-			player.active = true;
-			player.fake = false;
-			player.pClient = iserver->GetClient(client - 1);
-			g_QueryCache.info.nNumClients++;
-			if(bot)
-			{
-				player.fake = true;
-				g_QueryCache.info.nFakeClients++;
-			}
-			player.time = *net_time;
-			player.score = 0;
-			player.nameLen = strlcpy(player.name, player.pClient->GetClientName(), sizeof(player.name));
-
-			g_UserIDtoClientMap[userid] = client;
-
-			if (g_SvLogging.GetInt())
-				g_pSM->LogMessage(myself, "\tCPlayer(active=%d, fake=%d, pClient=%p, name=%s)", player.active, player.fake, player.pClient, player.name);
-		}
-
+		PlayerConnect(client, userid, bot, name);
 	}
 	else if(strcmp(name, "player_disconnect") == 0)
 	{
 		const int userid = event->GetInt("userid");
-		const int client = g_UserIDtoClientMap[userid];
-		g_UserIDtoClientMap[userid] = 0;
-
-		if (g_SvLogging.GetInt())
-			g_pSM->LogMessage(myself, "player_disconnect(userid=%d, client=%d)", userid, client);
-
-		if(client >= 1 && client <= SM_MAXPLAYERS)
-		{
-			CQueryCache::CPlayer &player = g_QueryCache.players[client];
-			if (g_SvLogging.GetInt())
-				g_pSM->LogMessage(myself, "\tCPlayer(active=%d, fake=%d, pClient=%p, name=%s)", player.active, player.fake, player.pClient, player.name);
-
-			if(player.active)
-			{
-				g_QueryCache.info.nNumClients--;
-				if(player.fake)
-					g_QueryCache.info.nFakeClients--;
-			}
-			player.active = false;
-			player.pClient = NULL;
-		}
-
-		if(client >= 1 && client <= SM_MAXPLAYERS)
-		{
-			char *pSteamID = g_ClientSteamIDMap[client];
-			if(*pSteamID)
-			{
-				if (g_SvLogging.GetInt())
-					g_pSM->LogMessage(myself, "%s OnClientDisconnecting: %d", pSteamID, client);
-
-				g_ConnectClientStorage.remove(pSteamID);
-				*pSteamID = 0;
-			}
-		}
+		PlayerDisconnect(userid);
 	}
 	else if(strcmp(name, "player_changename") == 0)
 	{
 		const int userid = event->GetInt("userid");
-		const int client = g_UserIDtoClientMap[userid];
-
-		g_Connect.OnClientSettingsChanged(client);
+		PlayerChangeName(userid);
 	}
 }
 
@@ -1285,4 +1378,5 @@ ResultType ConnectTimer::OnTimer(ITimer *pTimer, void *pData)
 	g_Connect.OnTimer();
 	return Pl_Continue;
 }
+
 void ConnectTimer::OnTimerEnd(ITimer *pTimer, void *pData) {}

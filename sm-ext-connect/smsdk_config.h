@@ -40,9 +40,9 @@
 /* Basic information exposed publicly */
 #define SMEXT_CONF_NAME			"Connect"
 #define SMEXT_CONF_DESCRIPTION	"Forward for early connection"
-#define SMEXT_CONF_VERSION		"2.6"
-#define SMEXT_CONF_AUTHOR		"Asher \"asherkin\" Baker + BotoX"
-#define SMEXT_CONF_URL			"https://github.com/CSSZombieEscape/sm-ext-connect"
+#define SMEXT_CONF_VERSION		"2.8"
+#define SMEXT_CONF_AUTHOR		"Asher \"asherkin\" Baker + BotoX + maxime1907"
+#define SMEXT_CONF_URL			""
 #define SMEXT_CONF_LOGTAG		"CONNECT"
 #define SMEXT_CONF_LICENSE		"GPL"
 #define SMEXT_CONF_DATESTRING	__DATE__
