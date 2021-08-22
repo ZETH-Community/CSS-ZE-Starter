@@ -43,8 +43,11 @@
 #include <ihltvdirector.h>
 #include <ihltv.h>
 #include <inetchannelinfo.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
+#include <winsock2.h>
+#pragma comment(lib, "Ws2_32.lib")
+#pragma comment(lib, "legacy_stdio_definitions.lib")
+//#include <sys/socket.h>
+//#include <netinet/in.h>
 
 size_t
 strlcpy(char *dst, const char *src, size_t dsize)
@@ -366,8 +369,9 @@ bool Hook_ProcessConnectionlessPacket(netpacket_t * packet)
 		to.sin_family = AF_INET;
 		to.sin_port = packet->from.port;
 		to.sin_addr.s_addr = *(int32_t *)&packet->from.ip;
-
-		sendto(g_ServerUDPSocket, g_QueryCache.info_cache, g_QueryCache.info_cache_len, 0, (sockaddr *)&to, sizeof(to));
+		
+		const char *sInfo_cache = (char*)g_QueryCache.info_cache;
+		sendto(g_ServerUDPSocket, sInfo_cache, g_QueryCache.info_cache_len, 0, (sockaddr *)&to, sizeof(to));
 
 		RETURN_META_VALUE(MRES_SUPERCEDE, true);
 	}
@@ -400,11 +404,15 @@ bool Hook_ProcessConnectionlessPacket(netpacket_t * packet)
 		{
 			uint8_t response[9] = {0xFF, 0xFF, 0xFF, 0xFF, 'A'};
 			*(int32_t *)&response[5] = realChallengeNr;
-			sendto(g_ServerUDPSocket, response, sizeof(response), 0, (sockaddr *)&to, sizeof(to));
+			
+			const char *sResponse = (char*)response;
+			
+			sendto(g_ServerUDPSocket, sResponse, sizeof(response), 0, (sockaddr *)&to, sizeof(to));
 			RETURN_META_VALUE(MRES_SUPERCEDE, true);
 		}
 
-		sendto(g_ServerUDPSocket, g_QueryCache.players_cache, g_QueryCache.players_cache_len, 0, (sockaddr *)&to, sizeof(to));
+		const char *sPlayers_cache = (char*)g_QueryCache.players_cache;
+		sendto(g_ServerUDPSocket, sPlayers_cache, g_QueryCache.players_cache_len, 0, (sockaddr *)&to, sizeof(to));
 
 		RETURN_META_VALUE(MRES_SUPERCEDE, true);
 	}
