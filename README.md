@@ -14,4 +14,4 @@ So if you have a plan to host NoSteam server, You have to install sm-ext-connect
 
 If you have a plan to host Steam only server, You can install sm-ext-A2QCache as optional, but do not install sm-ext-connect.
 
-### All credits to BOTOX!
+### I Do Not Own this, All credits to BOTOX!
