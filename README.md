@@ -1,5 +1,7 @@
 # CSS-ZE-Starter
 
+Simply Visit: https://github.com/srcdslab/ to get all you need. This repository is no longer need.
+
 All necessary extension and custom sourcemod that needed for CS:S Zombie Escape server. Mostly used by popular CS:S Zombie Escape server.
 
 Usually inorder to have these extensions for your server, you have to compile the extensions with yourself. 
